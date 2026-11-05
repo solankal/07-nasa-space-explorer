@@ -18,14 +18,141 @@ const modalDate = document.getElementById('modalDate');
 const modalExplanation = document.getElementById('modalExplanation');
 const modalCredit = document.getElementById('modalCredit');
 const closeModalButton = document.getElementById('closeModal');
-const apiUrl = 'https://api.nasa.gov/planetary/apod';
-const apiKey = 'DEMO_KEY';
+const apiUrl = 'https://science.nasa.gov/wp-json/wp/v2/image-article';
+const pageSize = 100;
 let activeRequest;
 
 // NASA includes HTML in some fields. Read it as text without inserting it into the page.
 function plainText(value) {
 	const documentWithText = new DOMParser().parseFromString(String(value || ''), 'text/html');
 	return documentWithText.body.textContent.trim();
+}
+
+// NASA's APOD articles are available through its official WordPress feed as JSONP.
+function loadArchivePage(parameters, signal) {
+	return new Promise((resolve, reject) => {
+		if (signal.aborted) {
+			reject(new Error('Request cancelled'));
+			return;
+		}
+
+		const callbackName = `nasaApodCallback${Date.now()}${Math.random().toString(36).slice(2)}`;
+		const script = document.createElement('script');
+		let timeoutId;
+
+		function cleanUp() {
+			clearTimeout(timeoutId);
+			script.remove();
+			delete window[callbackName];
+			signal.removeEventListener('abort', handleAbort);
+		}
+
+		function handleAbort() {
+			cleanUp();
+			reject(new Error('Request cancelled'));
+		}
+
+		window[callbackName] = (articles) => {
+			cleanUp();
+			if (articles && articles.code === 'rest_post_invalid_page_number') {
+				resolve([]);
+			} else if (Array.isArray(articles)) {
+				resolve(articles);
+			} else {
+				reject(new Error('NASA returned an unexpected archive response.'));
+			}
+		};
+
+		const query = new URLSearchParams(parameters);
+		query.set('_jsonp', callbackName);
+		script.async = true;
+		script.referrerPolicy = 'no-referrer';
+		script.src = `${apiUrl}?${query}`;
+		script.onerror = () => {
+			cleanUp();
+			reject(new Error('Could not reach NASA\'s APOD archive.'));
+		};
+
+		signal.addEventListener('abort', handleAbort, { once: true });
+		timeoutId = setTimeout(() => {
+			cleanUp();
+			reject(new Error('NASA\'s APOD archive took too long to respond.'));
+		}, 20000);
+		document.head.append(script);
+	});
+}
+
+// The API is date-filtered by NASA article records; keep only APOD photo entries.
+async function loadApodArticles(startDate, endDate, signal) {
+	const dayAfterEnd = new Date(`${endDate}T00:00:00Z`);
+	dayAfterEnd.setUTCDate(dayAfterEnd.getUTCDate() + 1);
+	const articles = [];
+	let page = 1;
+
+	while (page <= 10) {
+		const pageArticles = await loadArchivePage({
+			after: `${startDate}T00:00:00`,
+			before: `${dayAfterEnd.toISOString().slice(0, 10)}T00:00:00`,
+			per_page: String(pageSize),
+			page: String(page),
+			_fields: 'date,slug,title,content'
+		}, signal);
+
+		if (pageArticles.length === 0) break;
+		articles.push(...pageArticles);
+		if (pageArticles.length < pageSize) return articles;
+		page += 1;
+	}
+
+	if (page > 10) throw new Error('Choose a shorter date range to search NASA\'s archive.');
+	return articles;
+}
+
+function getApodPhoto(article) {
+	const articleDocument = new DOMParser().parseFromString(article.content?.rendered || '', 'text/html');
+	const image = Array.from(articleDocument.querySelectorAll('img')).find((candidate) => {
+		const source = candidate.getAttribute('src');
+		if (!source) return false;
+
+		try {
+			const imageUrl = new URL(source);
+			return imageUrl.protocol === 'https:' &&
+				imageUrl.hostname === 'assets.science.nasa.gov' &&
+				imageUrl.pathname.includes('/science/cds/apod/apod/');
+		} catch {
+			return false;
+		}
+	});
+
+	if (!image) return null;
+
+	const articleText = articleDocument.body.textContent.replace(/\s+/g, ' ').trim();
+	const explanationStart = articleText.indexOf('Explanation:');
+	let explanation = '';
+	if (explanationStart >= 0) {
+		const explanationText = articleText.slice(explanationStart + 'Explanation:'.length);
+		const explanationEnd = explanationText.search(/Tomorrow['\u2019]s picture:|Date:/);
+		explanation = (explanationEnd >= 0 ? explanationText.slice(0, explanationEnd) : explanationText).trim();
+	}
+
+	const creditStart = articleText.indexOf('Credit:');
+	let credit = '';
+	if (creditStart >= 0) {
+		const creditText = articleText.slice(creditStart + 'Credit:'.length);
+		const creditEnd = creditText.search(/Authors editors:|A service of:/);
+		credit = (creditEnd >= 0 ? creditText.slice(0, creditEnd) : creditText).trim();
+	}
+
+	const imageUrl = new URL(image.getAttribute('src'));
+	const title = plainText(article.title?.rendered).replace(/^APOD:\s*.*?[\u2013\u2014-]\s*/, '');
+	return {
+		date: article.date.slice(0, 10),
+		title: title || image.alt || 'Astronomy Picture of the Day',
+		alt: image.alt,
+		url: imageUrl.href,
+		explanation,
+		credit
+	};
 }
 
 // Use a local date so time zones do not shift a photo to the previous day.
@@ -102,41 +229,21 @@ filters.addEventListener('submit', async (event) => {
 	statusMessage.textContent = 'Loading space photos...';
 
 	try {
-		const parameters = new URLSearchParams({
-			api_key: apiKey,
-			start_date: startDate,
-			end_date: endDate
-		});
-		const response = await fetch(`${apiUrl}?${parameters}`, { signal: request.signal });
-		if (!response.ok) throw new Error(`NASA request failed: ${response.status}`);
-		const photos = await response.json();
-		if (!Array.isArray(photos)) throw new Error('Unexpected NASA response');
+		const articles = await loadApodArticles(startDate, endDate, request.signal);
 
 		if (request.signal.aborted) return;
-		// NASA sometimes returns its website logo instead of the dated APOD photo.
-		const hasPlaceholder = photos.some((photo) =>
-			photo.title === 'NASA Science' || /nasa-logo/i.test(photo.url || '')
-		);
-		// Some APOD entries are videos rather than photos, so only show usable images.
-		const images = photos.filter((photo) =>
-			photo.title !== 'NASA Science' && !/nasa-logo/i.test(photo.url || '') &&
-			photo.media_type === 'image' &&
-			typeof (photo.hdurl || photo.url) === 'string' &&
-			(photo.hdurl || photo.url).startsWith('https://') &&
-			photo.date >= startDate && photo.date <= endDate
-		);
+		const images = articles
+			.filter((article) => article.slug.startsWith('apod-'))
+			.map(getApodPhoto)
+			.filter((photo) => photo && photo.date >= startDate && photo.date <= endDate);
 		images.sort((first, second) => second.date.localeCompare(first.date));
 		displayPhotos(images);
 		statusMessage.textContent = images.length
-			? `${images.length} space ${images.length === 1 ? 'photo' : 'photos'}${hasPlaceholder ? '. Some dates are unavailable because NASA returned its logo instead of a photo.' : ''}`
-			: hasPlaceholder
-				? 'NASA returned its logo instead of the photos for these dates. The dated APOD archive is currently unavailable. Please try again later.'
-				: 'No space photos were found for these dates. Try another date range.';
+			? `${images.length} APOD ${images.length === 1 ? 'photo' : 'photos'}`
+			: 'No APOD photos were found for these dates. Some dates may have a video instead of a photo.';
 	} catch (error) {
 		if (request.signal.aborted) return;
-		statusMessage.textContent = error instanceof TypeError
-			? 'Could not reach NASA’s APOD API. Check your internet connection or try again later.'
-			: `NASA returned an error: ${error.message}`;
+		statusMessage.textContent = `Could not load NASA's APOD archive: ${error.message}`;
 		console.error(error);
 	} finally {
 		if (activeRequest === request) gallery.setAttribute('aria-busy', 'false');

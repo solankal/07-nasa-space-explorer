@@ -61,7 +61,7 @@ function displayPhotos(photos) {
 			<time class="photo-date"></time>
 		`;
 		const image = item.querySelector('img');
-		image.src = photo.hdurl;
+		image.src = photo.hdurl || photo.url;
 		image.alt = plainText(photo.alt || photo.title);
 		image.addEventListener('error', () => {
 			const message = document.createElement('span');

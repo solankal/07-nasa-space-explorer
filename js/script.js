@@ -113,8 +113,13 @@ filters.addEventListener('submit', async (event) => {
 		if (!Array.isArray(photos)) throw new Error('Unexpected NASA response');
 
 		if (request.signal.aborted) return;
+		// NASA sometimes returns its website logo instead of the dated APOD photo.
+		const hasPlaceholder = photos.some((photo) =>
+			photo.title === 'NASA Science' || /nasa-logo/i.test(photo.url || '')
+		);
 		// Some APOD entries are videos rather than photos, so only show usable images.
 		const images = photos.filter((photo) =>
+			photo.title !== 'NASA Science' && !/nasa-logo/i.test(photo.url || '') &&
 			photo.media_type === 'image' &&
 			typeof (photo.hdurl || photo.url) === 'string' &&
 			(photo.hdurl || photo.url).startsWith('https://') &&
@@ -123,8 +128,10 @@ filters.addEventListener('submit', async (event) => {
 		images.sort((first, second) => second.date.localeCompare(first.date));
 		displayPhotos(images);
 		statusMessage.textContent = images.length
-			? `${images.length} space ${images.length === 1 ? 'photo' : 'photos'}`
-			: 'No space photos were found for these dates. Try another date range.';
+			? `${images.length} space ${images.length === 1 ? 'photo' : 'photos'}${hasPlaceholder ? '. Some dates are unavailable because NASA returned its logo instead of a photo.' : ''}`
+			: hasPlaceholder
+				? 'NASA returned its logo instead of the photos for these dates. The dated APOD archive is currently unavailable. Please try again later.'
+				: 'No space photos were found for these dates. Try another date range.';
 	} catch (error) {
 		if (request.signal.aborted) return;
 		statusMessage.textContent = error instanceof TypeError

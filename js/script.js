@@ -18,7 +18,8 @@ const modalDate = document.getElementById('modalDate');
 const modalExplanation = document.getElementById('modalExplanation');
 const modalCredit = document.getElementById('modalCredit');
 const closeModalButton = document.getElementById('closeModal');
-const apiUrl = 'https://science.nasa.gov/wp-json/wp/v2/apod-basic';
+const apiUrl = 'https://api.nasa.gov/planetary/apod';
+const apiKey = 'DEMO_KEY';
 let activeRequest;
 
 // NASA includes HTML in some fields. Read it as text without inserting it into the page.
@@ -35,7 +36,7 @@ function formatDate(date) {
 }
 
 function openPhoto(photo) {
-	modalImage.src = photo.hdurl;
+	modalImage.src = photo.hdurl || photo.url;
 	modalImage.alt = plainText(photo.alt || photo.title);
 	modalTitle.textContent = plainText(photo.title);
 	modalDate.textContent = formatDate(photo.date);
@@ -86,6 +87,11 @@ filters.addEventListener('submit', async (event) => {
 		statusMessage.textContent = 'Choose an end date on or after the start date.';
 		return;
 	}
+	const rangeInDays = (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${startDate}T00:00:00Z`)) / 86400000;
+	if (rangeInDays > 99) {
+		statusMessage.textContent = 'Choose a date range of 100 days or less.';
+		return;
+	}
 
 	// Cancel an older search so it cannot overwrite the latest date range.
 	if (activeRequest) activeRequest.abort();
@@ -96,32 +102,22 @@ filters.addEventListener('submit', async (event) => {
 	statusMessage.textContent = 'Loading space photos...';
 
 	try {
-		const photos = [];
-		let page = 1;
-		let morePages = true;
-
-		// The API currently rejects its documented date filters, so filter its newest-first pages locally.
-		while (morePages) {
-			const parameters = new URLSearchParams({
-				per_page: '100',
-				page: `${page}`
-			});
-			const response = await fetch(`${apiUrl}?${parameters}`, { signal: request.signal });
-			if (!response.ok) throw new Error(`NASA request failed: ${response.status}`);
-			const data = await response.json();
-			if (!Array.isArray(data)) throw new Error('Unexpected NASA response');
-			photos.push(...data);
-			const oldestDateOnPage = data[data.length - 1]?.date;
-			morePages = data.length > 0 && oldestDateOnPage > startDate;
-			page += 1;
-		}
+		const parameters = new URLSearchParams({
+			api_key: apiKey,
+			start_date: startDate,
+			end_date: endDate
+		});
+		const response = await fetch(`${apiUrl}?${parameters}`, { signal: request.signal });
+		if (!response.ok) throw new Error(`NASA request failed: ${response.status}`);
+		const photos = await response.json();
+		if (!Array.isArray(photos)) throw new Error('Unexpected NASA response');
 
 		if (request.signal.aborted) return;
 		// Some APOD entries are videos rather than photos, so only show usable images.
 		const images = photos.filter((photo) =>
 			photo.media_type === 'image' &&
-			typeof photo.hdurl === 'string' &&
-			photo.hdurl.startsWith('https://') &&
+			typeof (photo.hdurl || photo.url) === 'string' &&
+			(photo.hdurl || photo.url).startsWith('https://') &&
 			photo.date >= startDate && photo.date <= endDate
 		);
 		images.sort((first, second) => second.date.localeCompare(first.date));
@@ -132,7 +128,7 @@ filters.addEventListener('submit', async (event) => {
 	} catch (error) {
 		if (request.signal.aborted) return;
 		statusMessage.textContent = error instanceof TypeError
-			? 'Could not connect to NASA. Check your internet connection and try again.'
+			? 'Could not reach NASA’s APOD API. Check your internet connection or try again later.'
 			: `NASA returned an error: ${error.message}`;
 		console.error(error);
 	} finally {

@@ -6,10 +6,20 @@
 }
 
 /* Base page styles */
+:root {
+  --nasa-blue: #0b3d91;
+  --nasa-red: #fc3d21;
+  --ink: #212121;
+  --muted: #58585b;
+  --paper: #ffffff;
+}
+
 body {
-  font-family: Arial, sans-serif;
+  font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
   background-color: #f1f1f1;
   padding: 20px;
+  color: var(--ink);
+  border-top: 5px solid var(--nasa-blue);
 }
 
 /* Centered container */
@@ -26,6 +36,8 @@ body {
   padding-top: 20px;
   padding-bottom: 20px;
   margin-bottom: 20px;
+  gap: 24px;
+  border-bottom: 3px solid var(--nasa-red);
 }
 
 h1 {
@@ -37,7 +49,8 @@ h1 {
 /* Logo */
 .logo {
   width: 140px;
-  margin-right: 15px;
+  height: auto;
+  flex-shrink: 0;
 }
 
 /* Date‐picker & button row */
@@ -48,6 +61,15 @@ h1 {
   justify-content: center;
   margin-bottom: 20px;
   padding: 0 20px;
+  align-items: stretch;
+}
+
+.filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: bold;
+  font-size: 14px;
 }
 
 /* Inputs and buttons */
@@ -55,7 +77,7 @@ input[type="date"],
 button {
   font-family: Arial, sans-serif;
   font-weight: normal;
-  color: #666;
+  color: var(--ink);
   padding: 10px 15px;
   border: 1px solid #ddd;
   border-radius: 4px;
@@ -66,12 +88,31 @@ button {
 
 /* Button specific */
 button {
-  background-color: #d3d3d3;
-  color: black;
+  background-color: var(--nasa-blue);
+  color: var(--paper);
   cursor: pointer;
 }
 button:hover {
-  background-color: #bfbfbf;
+  background-color: #082c69;
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--nasa-blue);
+  outline-offset: 4px;
+}
+
+.filters button {
+  font-weight: bold;
+  align-self: end;
+}
+
+.gallery-status {
+  text-align: center;
+  color: var(--muted);
+  min-height: 24px;
+  line-height: 1.5;
 }
 
 /* Stack horizontally on wider screens */
@@ -79,6 +120,7 @@ button:hover {
   .filters {
     flex-direction: row;
     padding: 0;
+    flex-wrap: wrap;
   }
   
   input[type="date"],
@@ -99,15 +141,38 @@ button:hover {
 /* Gallery items */
 .gallery-item {
   flex: 1 1 100%;  /* full width by default */
-  min-width: 280px;
+  min-width: 0;
   max-width: 500px;
   background: white;
-  padding: 10px;
+  padding: 0;
   border-radius: 8px;
   box-shadow: 0 2px 5px rgba(0,0,0,0.1);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  color: var(--ink);
+  text-align: left;
+  border: 1px solid #ddd;
+  width: 100%;
+}
+
+.gallery-item:hover {
+  background: var(--paper);
+}
+
+.image-frame {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: #e3e5e8;
+}
+
+.image-unavailable {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--muted);
 }
 
 /* Three columns on wider screens */
@@ -119,14 +184,27 @@ button:hover {
 
 .gallery-item img {
   width: 100%;
-  height: 200px;
+  height: 100%;
   object-fit: cover;
-  border-radius: 4px;
+  display: block;
+  transition: transform 300ms ease;
 }
 
-.gallery-item p {
-  margin-top: 10px;
-  padding: 5px;
+.gallery-item:hover img,
+.gallery-item:focus-visible img {
+  transform: scale(1.06);
+}
+
+.photo-title {
+  padding: 16px 16px 6px;
+  font-weight: bold;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.photo-date {
+  padding: 0 16px 16px;
+  color: var(--muted);
   font-size: 14px;
 }
 
@@ -141,4 +219,100 @@ button:hover {
 .placeholder-icon {
   font-size: 48px;
   margin-bottom: 20px;
+}
+
+/* Keep the original NASA logo intact, with room around it and no decorative effects. */
+.site-footer {
+  border-top: 1px solid #ccc;
+  margin-top: 24px;
+  padding: 20px 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.site-footer a {
+  color: var(--nasa-blue);
+}
+
+/* The native dialog stays above the gallery and scrolls on small screens. */
+.photo-modal {
+  margin: auto;
+  width: min(920px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  overflow-y: auto;
+}
+
+.photo-modal::backdrop {
+  background: rgb(0 0 0 / 75%);
+}
+
+body:has(.photo-modal[open]) {
+  overflow: hidden;
+}
+
+.modal-close {
+  position: sticky;
+  top: 12px;
+  margin: 12px 12px 12px auto;
+  display: block;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  font-size: 30px;
+  line-height: 1;
+  z-index: 1;
+}
+
+.modal-image {
+  display: block;
+  width: 100%;
+  height: min(55vh, 560px);
+  object-fit: contain;
+  background: #111;
+  color: white;
+}
+
+.modal-details {
+  padding: 24px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.modal-details h2 {
+  font-size: 24px;
+  line-height: 1.25;
+  margin-bottom: 8px;
+}
+
+.modal-details time,
+.photo-credit {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.modal-details p {
+  margin-top: 16px;
+  white-space: pre-line;
+}
+
+@media (max-width: 599px) {
+  body { padding: 12px; }
+  .site-header { gap: 16px; }
+  .logo { width: 100px; }
+  h1 { font-size: 24px; }
+  .filters, .gallery { padding: 0; }
+  .modal-details { padding: 20px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gallery-item img { transition: none; }
+  .gallery-item:hover img,
+  .gallery-item:focus-visible img { transform: none; }
 }

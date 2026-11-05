@@ -100,11 +100,9 @@ filters.addEventListener('submit', async (event) => {
 		let page = 1;
 		let morePages = true;
 
-		// The API returns pages of results. Keep fetching until the date range is complete.
+		// The API currently rejects its documented date filters, so filter its newest-first pages locally.
 		while (morePages) {
 			const parameters = new URLSearchParams({
-				date_from: startDate,
-				date_to: endDate,
 				per_page: '100',
 				page: `${page}`
 			});
@@ -113,7 +111,8 @@ filters.addEventListener('submit', async (event) => {
 			const data = await response.json();
 			if (!Array.isArray(data)) throw new Error('Unexpected NASA response');
 			photos.push(...data);
-			morePages = data.length === 100;
+			const oldestDateOnPage = data[data.length - 1]?.date;
+			morePages = data.length > 0 && oldestDateOnPage > startDate;
 			page += 1;
 		}
 
@@ -132,7 +131,9 @@ filters.addEventListener('submit', async (event) => {
 			: 'No space photos were found for these dates. Try another date range.';
 	} catch (error) {
 		if (request.signal.aborted) return;
-		statusMessage.textContent = 'Unable to load space photos. Please check your connection and try again.';
+		statusMessage.textContent = error instanceof TypeError
+			? 'Could not connect to NASA. Check your internet connection and try again.'
+			: `NASA returned an error: ${error.message}`;
 		console.error(error);
 	} finally {
 		if (activeRequest === request) gallery.setAttribute('aria-busy', 'false');
